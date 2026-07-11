@@ -2,6 +2,12 @@
 
 一个 macOS 端实时抓取 Android 日志的工具，提供过滤、屏蔽、搜索等功能。轻量高性能，适合不想为看日志而启动 Android Studio 的开发者。
 
+## 截图
+
+| 夜间模式 | 日间模式 |
+| :---: | :---: |
+| ![dark mode](docs/screenshot-dark.png) | ![light mode](docs/screenshot-light.png) |
+
 ## 环境要求
 
 - macOS 14.0 (Sonoma) 或更高
