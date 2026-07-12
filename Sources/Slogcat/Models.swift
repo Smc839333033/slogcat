@@ -50,12 +50,12 @@ struct Device: Identifiable, Sendable, Hashable {
 enum FilterKind: String, CaseIterable, Identifiable, Sendable {
     case msgInclude    = "内容·包含"
     case msgExclude    = "内容·排除"
-    case msgIncludeRx  = "内容·正含"
-    case msgExcludeRx  = "内容·正排"
+    case msgIncludeRx  = "内容·正则"
+    case msgExcludeRx  = "内容·正则排除"
     case tagInclude    = "Tag·包含"
     case tagExclude    = "Tag·排除"
-    case tagIncludeRx  = "Tag·正含"
-    case tagExcludeRx  = "Tag·正排"
+    case tagIncludeRx  = "Tag·正则"
+    case tagExcludeRx  = "Tag·正则排除"
     case pidEquals     = "PID·等于"
 
     var id: String { rawValue }
@@ -69,6 +69,53 @@ enum FilterKind: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .msgIncludeRx, .msgExcludeRx, .tagIncludeRx, .tagExcludeRx: return true
         default: return false
+        }
+    }
+
+    /// The field this rule targets — used to group the dropdown.
+    enum Field: String, CaseIterable, Identifiable { case message = "内容", tag = "Tag", pid = "PID"; var id: String { rawValue } }
+    var field: Field {
+        switch self {
+        case .msgInclude, .msgExclude, .msgIncludeRx, .msgExcludeRx: return .message
+        case .tagInclude, .tagExclude, .tagIncludeRx, .tagExcludeRx: return .tag
+        case .pidEquals: return .pid
+        }
+    }
+
+    /// Short mode label shown in the dropdown row and on committed chips.
+    var modeLabel: String {
+        switch self {
+        case .msgInclude, .tagInclude:     return "包含"
+        case .msgExclude, .tagExclude:     return "排除"
+        case .msgIncludeRx, .tagIncludeRx: return "正则匹配"
+        case .msgExcludeRx, .tagExcludeRx: return "正则排除"
+        case .pidEquals:                   return "等于"
+        }
+    }
+
+    /// SF Symbol representing the mode — include=✓, exclude=⊘, regex adds the `.*` glyph.
+    var icon: String {
+        switch self {
+        case .msgInclude, .tagInclude:     return "checkmark"
+        case .msgExclude, .tagExclude:     return "nosign"
+        case .msgIncludeRx, .tagIncludeRx: return "text.magnifyingglass"
+        case .msgExcludeRx, .tagExcludeRx: return "xmark.circle"
+        case .pidEquals:                   return "number"
+        }
+    }
+
+    /// One-line plain-language explanation shown under each dropdown row.
+    var hint: String {
+        switch self {
+        case .msgInclude:   return "仅显示内容含此文字的日志"
+        case .msgExclude:   return "隐藏内容含此文字的日志"
+        case .msgIncludeRx: return "内容匹配正则表达式则显示"
+        case .msgExcludeRx: return "内容匹配正则表达式则隐藏"
+        case .tagInclude:   return "仅显示 Tag 含此文字的日志"
+        case .tagExclude:   return "隐藏 Tag 含此文字的日志"
+        case .tagIncludeRx: return "Tag 匹配正则表达式则显示"
+        case .tagExcludeRx: return "Tag 匹配正则表达式则隐藏"
+        case .pidEquals:    return "仅显示指定进程 ID 的日志"
         }
     }
 }

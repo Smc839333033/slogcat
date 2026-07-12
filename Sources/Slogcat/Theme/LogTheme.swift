@@ -71,6 +71,13 @@ enum LogTheme {
     static var dotGrid:       Color { ThemeManagerShared.isDark ? Dark.dotGrid        : Light.dotGrid }
     static var controlHover:  Color { ThemeManagerShared.isDark ? Dark.controlHover   : Light.controlHover }
     static let accent         = Color(red: 1.0, green: 0.05, blue: 0.05)   // Nothing red — same in both
+    /// Soft green for "active / has-results" affordances (e.g. search hits). Calmer than the
+    /// red accent, which is reserved for streaming/error emphasis.
+    static var activeGreen: Color {
+        ThemeManagerShared.isDark
+            ? Color(red: 0.45, green: 0.82, blue: 0.55)   // brighter on charcoal
+            : Color(red: 0.20, green: 0.62, blue: 0.35)   // deeper on off-white
+    }
 
     // Back-compat aliases
     static let panel          = surface

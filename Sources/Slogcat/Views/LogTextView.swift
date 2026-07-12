@@ -6,6 +6,12 @@ import SwiftUI
 enum LogTextBuilder {
     static let highlightColor = NSColor.systemYellow.withAlphaComponent(0.32)
 
+    /// Fixed column widths for pid/tid so the level/tag/message columns stay left-aligned
+    /// across lines regardless of pid/tid digit count. 5 covers the vast majority of Android
+    /// pids/tids; longer values simply widen that line (rare, harmless).
+    static let pidWidth = 5
+    static let tidWidth = 5
+
     /// Background matching the current theme. Read at call time so appearance changes take effect.
     static var backgroundColor: NSColor {
         ThemeManagerShared.isDark
@@ -57,7 +63,14 @@ enum LogTextBuilder {
             s.append(NSAttributedString(string: entry.timestamp + " ", attributes: [.foregroundColor: dim, .font: font]))
         }
         if entry.pid != 0 {
-            s.append(NSAttributedString(string: "\(entry.pid) \(entry.tid) ", attributes: [.foregroundColor: dim, .font: font]))
+            // Right-pad pid/tid to a fixed width so the level/tag/message columns line up.
+            // Monospace font → equal char width, so space-padding alone aligns perfectly.
+            // O(1) per line (just a few extra spaces); no impact on offset/search/trim math.
+            let pid = String(entry.pid)
+            let tid = String(entry.tid)
+            let pidPad = String(repeating: " ", count: max(0, LogTextBuilder.pidWidth - pid.count))
+            let tidPad = String(repeating: " ", count: max(0, LogTextBuilder.tidWidth - tid.count))
+            s.append(NSAttributedString(string: "\(pidPad)\(pid) \(tidPad)\(tid) ", attributes: [.foregroundColor: dim, .font: font]))
         }
         s.append(NSAttributedString(string: entry.level.rawValue + " ", attributes: [.foregroundColor: c, .font: font]))
         if !entry.tag.isEmpty {

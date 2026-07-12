@@ -7,32 +7,51 @@ struct ContentView: View {
     @State private var searchVisible = false
     @State private var searchQuery = ""
     @FocusState private var searchFocused: Bool
+    // Device dropdown state lives here (not inside ToolbarView) so the menu can be drawn at
+    // the top level and overlay the filter/log area below the toolbar instead of being
+    // clipped by it. `deviceMenuFrame` is the picker button's frame in the "root" space.
+    @State private var deviceMenuOpen = false
+    @State private var deviceMenuFrame: CGRect = .zero
 
     var body: some View {
         let _ = store.theme.appearance   // explicit dependency so LogTheme colors refresh on toggle
-        VStack(spacing: 0) {
-            ToolbarView(showAdbConfig: $showAdbConfig, showFilters: $showFilters,
-                        searchVisible: $searchVisible)
-            if showFilters {
-                FilterPanel()
-                Rectangle().fill(LogTheme.border).frame(height: 1)
-            }
-            LogTextView()
-                .overlay(alignment: .topTrailing) {
-                    if searchVisible { searchBar.padding(8) }
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: 0) {
+                ToolbarView(showAdbConfig: $showAdbConfig, showFilters: $showFilters,
+                            searchVisible: $searchVisible,
+                            deviceMenuOpen: $deviceMenuOpen, deviceMenuFrame: $deviceMenuFrame)
+                if showFilters {
+                    FilterPanel()
+                    Rectangle().fill(LogTheme.border).frame(height: 1)
                 }
-                .overlay(alignment: .bottomLeading) {
-                    if let err = store.errorMessage {
-                        Text(err)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(LogTheme.accent)
-                            .padding(6)
-                            .background(LogTheme.surface, in: RoundedRectangle(cornerRadius: 4))
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(LogTheme.accent.opacity(0.5)))
-                            .padding(8)
+                LogTextView()
+                    .overlay(alignment: .topTrailing) {
+                        // Offset the extra scroller width (~16pt) on the trailing edge so the
+                        // search bar never covers the log view's scrollbar.
+                        if searchVisible {
+                            searchBar
+                                .padding(.top, 8)
+                                .padding(.trailing, 8 + 16)
+                                .padding(.leading, 8)
+                        }
                     }
-                }
+                    .overlay(alignment: .bottomLeading) {
+                        if let err = store.errorMessage {
+                            Text(err)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(LogTheme.accent)
+                                .padding(6)
+                                .background(LogTheme.surface, in: RoundedRectangle(cornerRadius: 4))
+                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(LogTheme.accent.opacity(0.5)))
+                                .padding(8)
+                        }
+                    }
+            }
+            // Device dropdown, drawn at the top level so it sits above the toolbar AND the
+            // filter/log area below it.
+            deviceMenuOverlay
         }
+        .coordinateSpace(name: "root")
         .background(LogTheme.background)
         .background(WindowAccessor { w in
             w.isMovableByWindowBackground = true
@@ -44,16 +63,69 @@ struct ContentView: View {
         .onChange(of: searchVisible) { _, visible in if visible { searchFocused = true } }
     }
 
+    /// Device dropdown menu, positioned right under the picker button. Only the device rows
+    /// are shown (DEFAULT + connected devices); an empty list never opens the menu, so this
+    /// only renders when there is something to pick.
+    @ViewBuilder
+    private var deviceMenuOverlay: some View {
+        if deviceMenuOpen {
+            // Click-catcher covering the whole window closes the menu on outside taps.
+            Color.clear
+                .contentShape(Rectangle())
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onTapGesture { deviceMenuOpen = false }
+
+            VStack(spacing: 0) {
+                deviceMenuOption("DEFAULT", isSelected: store.selectedDeviceId == nil) {
+                    store.selectedDeviceId = nil
+                    deviceMenuOpen = false
+                }
+                ForEach(store.devices) { d in
+                    deviceMenuOption(d.id, isSelected: store.selectedDeviceId == d.id) {
+                        store.selectedDeviceId = d.id
+                        deviceMenuOpen = false
+                    }
+                }
+            }
+            .frame(width: max(160, deviceMenuFrame.width))
+            .background(LogTheme.background)
+            .overlay(Rectangle().stroke(LogTheme.borderStrong))
+            .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+            .offset(x: deviceMenuFrame.minX, y: deviceMenuFrame.maxY + 4)
+        }
+    }
+
+    private func deviceMenuOption(_ label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(isSelected ? LogTheme.accent : LogTheme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(isSelected ? LogTheme.surfaceRaised : Color.clear)
+                .overlay(alignment: .leading) {
+                    if isSelected { Rectangle().fill(LogTheme.accent).frame(width: 2) }
+                }
+                .background(PointerCursor())
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+
     private func openSearch() {
         searchVisible = true
         searchFocused = true
     }
 
     private var searchBar: some View {
-        HStack(spacing: 6) {
+        let hasQuery = !searchQuery.isEmpty
+        let hasMatches = !store.searchMatches.isEmpty
+        return HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(LogTheme.textSecondary)
-            TextField("搜索 ⏎", text: $searchQuery)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(hasMatches ? LogTheme.activeGreen : LogTheme.textSecondary)
+            TextField("搜索日志…", text: $searchQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(LogTheme.textPrimary)
@@ -61,28 +133,47 @@ struct ContentView: View {
                 .focused($searchFocused)
                 .onSubmit { store.runSearch(searchQuery) }
                 .onKeyPress(.escape) { searchVisible = false; store.closeSearch(); return .handled }
-            Text(store.searchMatches.isEmpty
-                 ? "0/0"
-                 : "\(store.searchCurrentIndex + 1)/\(store.searchMatches.count)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(LogTheme.textSecondary)
+
+            // Match counter — accent when there are hits, dim otherwise.
+            Text(hasMatches ? "\(store.searchCurrentIndex + 1)/\(store.searchMatches.count)"
+                            : (hasQuery ? "0/0" : "—"))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(hasMatches ? LogTheme.activeGreen : LogTheme.textSecondary)
                 .lineLimit(1)
                 .fixedSize()
-                .frame(minWidth: 40, alignment: .trailing)
-            Button { store.prevMatch() } label: { Image(systemName: "chevron.up") }
-                .buttonStyle(PressableButtonStyle())
-                .help("上一个")
-            Button { store.nextMatch() } label: { Image(systemName: "chevron.down") }
-                .buttonStyle(PressableButtonStyle())
-                .help("下一个")
-            Button { searchVisible = false; store.closeSearch() } label: { Image(systemName: "xmark") }
-                .buttonStyle(PressableButtonStyle())
-                .help("关闭")
+                .frame(minWidth: 42, alignment: .trailing)
+
+            searchSep()
+
+            searchIconButton("chevron.up", help: "上一个", disabled: !hasMatches) { store.prevMatch() }
+            searchIconButton("chevron.down", help: "下一个", disabled: !hasMatches) { store.nextMatch() }
+
+            searchSep()
+
+            searchIconButton("xmark", help: "关闭 (Esc)") { searchVisible = false; store.closeSearch() }
         }
-        .padding(.horizontal, 8)
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
         .padding(.vertical, 5)
-        .background(LogTheme.surfaceRaised)
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(LogTheme.borderStrong))
+        .background(LogTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(searchFocused ? LogTheme.activeGreen.opacity(0.6) : LogTheme.borderStrong))
+        .shadow(color: .black.opacity(0.22), radius: 8, y: 3)
+        .animation(.easeOut(duration: 0.12), value: searchFocused)
+    }
+
+    private func searchSep() -> some View {
+        Rectangle().fill(LogTheme.border).frame(width: 1, height: 16)
+    }
+
+    private func searchIconButton(_ systemName: String, help: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(disabled ? LogTheme.textSecondary.opacity(0.4) : LogTheme.textPrimary)
+        }
+        .buttonStyle(ToolbarIconButtonStyle(disabled: disabled))
+        .disabled(disabled)
+        .help(help)
     }
 }
 
@@ -93,6 +184,8 @@ struct ToolbarView: View {
     @Binding var showAdbConfig: Bool
     @Binding var showFilters: Bool
     @Binding var searchVisible: Bool
+    @Binding var deviceMenuOpen: Bool
+    @Binding var deviceMenuFrame: CGRect
 
     var body: some View {
         @Bindable var store = store
@@ -174,23 +267,23 @@ struct ToolbarView: View {
         .overlay(alignment: .bottom) { Rectangle().fill(LogTheme.border).frame(height: 1) }
     }
 
-    @State private var deviceMenuOpen: Bool = false
-    @State private var deviceMenuFrame: CGRect = .zero
-
     private var devicePicker: some View {
-        let label = store.devices.isEmpty ? "WAITING FOR DEVICE" : (store.selectedDeviceId ?? "DEFAULT")
+        let hasDevices = !store.devices.isEmpty
+        let label = hasDevices ? (store.selectedDeviceId ?? "DEFAULT") : "WAITING FOR DEVICE"
         return Button {
+            guard hasDevices else { return }   // nothing to pick → don't open an empty menu
             deviceMenuOpen.toggle()
         } label: {
             HStack(spacing: 3) {
                 Text(label)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(store.devices.isEmpty ? LogTheme.textSecondary : LogTheme.textPrimary)
+                    .foregroundStyle(hasDevices ? LogTheme.textPrimary : LogTheme.textSecondary)
                     .lineLimit(1)
                     .frame(maxWidth: 160, alignment: .leading)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(LogTheme.textSecondary)
+                    .opacity(hasDevices ? 1 : 0.35)
                     .rotationEffect(.degrees(deviceMenuOpen ? 180 : 0))
                     .animation(.easeInOut(duration: 0.15), value: deviceMenuOpen)
             }
@@ -199,70 +292,19 @@ struct ToolbarView: View {
             .background(LogTheme.surfaceRaised)
             .overlay(RoundedRectangle(cornerRadius: 3).stroke(LogTheme.borderStrong))
             .contentShape(Rectangle())
+            // Report the button's frame in the window-level "root" space so ContentView can
+            // position the dropdown right below it.
             .background(
                 GeometryReader { geo in
                     Color.clear
-                        .onAppear { deviceMenuFrame = geo.frame(in: .named("toolbar")) }
-                        .onChange(of: geo.frame(in: .named("toolbar"))) { _, f in deviceMenuFrame = f }
+                        .onAppear { deviceMenuFrame = geo.frame(in: .named("root")) }
+                        .onChange(of: geo.frame(in: .named("root"))) { _, f in deviceMenuFrame = f }
                 }
             )
         }
         .buttonStyle(PressableButtonStyle())
-        .overlay(alignment: .topLeading) {
-            if deviceMenuOpen {
-                ZStack(alignment: .topLeading) {
-                    Color.clear
-                        .frame(width: 10_000, height: 10_000)
-                        .offset(x: -5_000, y: -5_000)
-                        .contentShape(Rectangle())
-                        .onTapGesture { deviceMenuOpen = false }
-                    VStack(spacing: 0) {
-                        if store.devices.isEmpty {
-                            Text("Waiting for device…")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(LogTheme.textSecondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                        } else {
-                            deviceMenuOption("DEFAULT", isSelected: store.selectedDeviceId == nil) {
-                                store.selectedDeviceId = nil
-                                deviceMenuOpen = false
-                            }
-                            ForEach(store.devices) { d in
-                                deviceMenuOption(d.id, isSelected: store.selectedDeviceId == d.id) {
-                                    store.selectedDeviceId = d.id
-                                    deviceMenuOpen = false
-                                }
-                            }
-                        }
-                    }
-                    .frame(width: max(160, deviceMenuFrame.width))
-                    .background(LogTheme.background)
-                    .overlay(Rectangle().stroke(LogTheme.borderStrong))
-                    .offset(x: deviceMenuFrame.minX, y: deviceMenuFrame.maxY + 4)
-                }
-            }
-        }
-        .zIndex(deviceMenuOpen ? 1000 : 0)
-    }
-
-    private func deviceMenuOption(_ label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(isSelected ? LogTheme.accent : LogTheme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(isSelected ? LogTheme.surfaceRaised : Color.clear)
-                .overlay(alignment: .leading) {
-                    if isSelected { Rectangle().fill(LogTheme.accent).frame(width: 2) }
-                }
-                .background(PointerCursor())
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(PressableButtonStyle())
+        // Close the menu if all devices disconnect while it's open.
+        .onChange(of: store.devices.isEmpty) { _, empty in if empty { deviceMenuOpen = false } }
     }
 
     private func sep() -> some View {
@@ -314,6 +356,9 @@ struct AdbConfigSheet: View {
                     Circle().fill(LogTheme.accent).frame(width: 7, height: 7)
                     Text("FONT SIZE").font(LogTheme.labelFont(11)).tracking(1.5)
                 }
+                Text("日志文字的字号，可用工具栏的 −/＋ 或此处调整（8–28）。")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(LogTheme.textSecondary)
                 HStack(spacing: 10) {
                     Button { store.setFontSize(store.fontSize - 1) } label: {
                         Image(systemName: "minus")
@@ -342,6 +387,9 @@ struct AdbConfigSheet: View {
                     Circle().fill(LogTheme.accent).frame(width: 7, height: 7)
                     Text("APPEARANCE").font(LogTheme.labelFont(11)).tracking(1.5)
                 }
+                Text("界面主题：夜间为深色护眼，日间为浅色高亮。")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(LogTheme.textSecondary)
                 HStack(spacing: 8) {
                     ForEach(Appearance.allCases) { a in
                         Button {

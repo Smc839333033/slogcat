@@ -52,7 +52,9 @@ struct FilterPanel: View {
             Button {
                 menuOpen.toggle()
             } label: {
-                HStack(spacing: 3) {
+                HStack(spacing: 5) {
+                    Image(systemName: composerKind.icon)
+                        .font(.system(size: 10, weight: .medium))
                     Text(composerKind.rawValue)
                         .font(.system(size: 11, design: .monospaced))
                     Image(systemName: "chevron.down")
@@ -99,62 +101,93 @@ struct FilterPanel: View {
         )
     }
 
-    // MARK: Dropdown list (sharp corners, opens below the trigger)
+    // MARK: Dropdown list — grouped by field, each row shows icon + mode + hint
 
     private var dropdownList: some View {
-        VStack(spacing: 0) {
-            ForEach(FilterKind.allCases) { kind in
-                DropdownOption(
-                    label: kind.rawValue,
-                    isExclude: kind.isExclude,
-                    isSelected: composerKind == kind,
-                    action: {
-                        composerKind = kind
-                        menuOpen = false
-                    }
-                )
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(FilterKind.Field.allCases.enumerated()), id: \.element.id) { idx, field in
+                if idx > 0 {
+                    Rectangle().fill(LogTheme.border).frame(height: 1)
+                }
+                // Group header
+                Text(field.rawValue)
+                    .font(LogTheme.labelFont(9))
+                    .tracking(1.2)
+                    .foregroundStyle(LogTheme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 3)
+                ForEach(FilterKind.allCases.filter { $0.field == field }) { kind in
+                    DropdownOption(
+                        kind: kind,
+                        isSelected: composerKind == kind,
+                        action: {
+                            composerKind = kind
+                            menuOpen = false
+                        }
+                    )
+                }
             }
         }
-        .frame(width: 108)
+        .padding(.bottom, 6)
+        .frame(width: 240)
         .background(LogTheme.background)
-        .overlay(Rectangle().stroke(LogTheme.borderStrong))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(LogTheme.borderStrong))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .shadow(color: .black.opacity(0.28), radius: 10, y: 4)
     }
 
     // MARK: Committed chip (read-only, toggleable, deletable)
+    // Layout hierarchy: the user's keyword (rule.text) is the hero — largest & highest
+    // contrast. The mode (icon + tiny label) is secondary, tucked to the left behind a
+    // divider. Clicking the mode area toggles enable/disable.
 
     private func committedChip(_ rule: FilterRule) -> some View {
         @Bindable var rule = rule
         let isExclude = rule.kind.isExclude
-        let accent = isExclude ? LogTheme.accent : LogTheme.textPrimary
+        let modeColor = rule.enabled ? (isExclude ? LogTheme.accent : LogTheme.textSecondary)
+                                     : LogTheme.textSecondary.opacity(0.6)
         let borderColor = rule.enabled
             ? (isExclude ? LogTheme.accent.opacity(0.55) : LogTheme.borderStrong)
             : LogTheme.border
 
-        return HStack(spacing: 6) {
+        return HStack(spacing: 0) {
+            // Mode area (icon + tiny label) — click toggles enable/disable.
             Button {
                 rule.enabled.toggle()
                 store.recompileFilter()
             } label: {
-                Image(systemName: rule.enabled ? "circle.fill" : "circle")
-                    .font(.system(size: 8))
-                    .foregroundStyle(rule.enabled ? accent : LogTheme.textSecondary)
+                HStack(spacing: 4) {
+                    Image(systemName: rule.kind.icon)
+                        .font(.system(size: 10, weight: .medium))
+                    Text(rule.kind.rawValue)
+                        .font(.system(size: 9, design: .monospaced))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                .foregroundStyle(modeColor)
+                .opacity(rule.enabled ? 1 : 0.7)
+                .padding(.horizontal, 8)
+                .frame(maxHeight: .infinity)
+                .background(PointerCursor())
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(rule.enabled ? "停用" : "启用")
+            .help(rule.enabled ? "点击停用此过滤" : "点击启用此过滤")
 
-            Text(rule.kind.rawValue)
-                .font(LogTheme.labelFont(9))
-                .foregroundStyle(rule.enabled ? accent : LogTheme.textSecondary)
-                .lineLimit(1)
-                .fixedSize()
+            Rectangle().fill(LogTheme.border).frame(width: 1, height: 16)
 
+            // Keyword (hero) — largest, highest contrast.
             Text(rule.text)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .foregroundStyle(rule.enabled ? LogTheme.textPrimary : LogTheme.textSecondary)
+                .strikethrough(!rule.enabled, color: LogTheme.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(minWidth: 40, maxWidth: 220, alignment: .leading)
+                .frame(minWidth: 30, maxWidth: 220, alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
+                .padding(.leading, 8)
+                .padding(.trailing, 6)
 
             Button {
                 store.deleteRule(id: rule.id)
@@ -162,17 +195,22 @@ struct FilterPanel: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(LogTheme.textSecondary)
+                    .padding(.trailing, 8)
+                    .padding(.leading, 2)
+                    .frame(maxHeight: .infinity)
+                    .background(PointerCursor())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("删除")
         }
-        .padding(.horizontal, 8)
         .frame(height: 30)
         .fixedSize(horizontal: true, vertical: false)   // chip always sizes to content, never wraps
         .background(rule.enabled
             ? (isExclude ? LogTheme.accent.opacity(0.08) : LogTheme.surface)
             : LogTheme.surface.opacity(0.5))
-        .overlay(RoundedRectangle(cornerRadius: 3).stroke(borderColor))
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke(borderColor))
     }
 
     private func levelChip(_ lvl: LogLevel) -> some View {
@@ -195,31 +233,47 @@ struct FilterPanel: View {
     }
 }
 
-// MARK: - Dropdown option (hover + selected states)
+// MARK: - Dropdown option (icon + mode + hint, hover + selected states)
 
 private struct DropdownOption: View {
-    let label: String
-    let isExclude: Bool
+    let kind: FilterKind
     let isSelected: Bool
     let action: () -> Void
     @State private var isHovered = false
 
     var body: some View {
+        let tint = kind.isExclude ? LogTheme.accent : LogTheme.textPrimary
         Button(action: action) {
-            Text(label)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(isExclude ? LogTheme.accent : LogTheme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(isHovered ? LogTheme.surfaceRaised : Color.clear)
-                .overlay(alignment: .leading) {
-                    if isSelected {
-                        Rectangle().fill(LogTheme.accent).frame(width: 2)
-                    }
+            HStack(spacing: 9) {
+                Image(systemName: kind.icon)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(tint)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(kind.modeLabel)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(tint)
+                    Text(kind.hint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(LogTheme.textSecondary)
+                        .lineLimit(1)
                 }
-                .background(PointerCursor())   // hand cursor via AppKit cursor rect
-                .contentShape(Rectangle())
+                Spacer(minLength: 4)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(LogTheme.activeGreen)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isHovered ? LogTheme.surfaceRaised : Color.clear)
+            .overlay(alignment: .leading) {
+                if isSelected { Rectangle().fill(LogTheme.activeGreen).frame(width: 2) }
+            }
+            .background(PointerCursor())
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
