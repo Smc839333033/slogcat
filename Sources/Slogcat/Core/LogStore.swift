@@ -34,6 +34,7 @@ final class LogStore {
     private var streamTask: Task<Void, Never>?
     private var snapshotTask: Task<Void, Never>?
     private var recomputeTask: Task<Void, Never>?
+    private var devicePollTask: Task<Void, Never>?
     var recomputing: Bool = false
     private var clearing: Bool = false
 
@@ -41,6 +42,7 @@ final class LogStore {
         self.pipeline = LogPipeline(capacity: 50_000, filter: FilterEngine.compile(.default))
         ThemeManagerShared = theme
         startSnapshotTask()
+        startDevicePollTask()
     }
 
     // MARK: - Streaming
@@ -307,11 +309,38 @@ final class LogStore {
 
     // MARK: - Devices
 
+    /// Fetch the current device list and reconcile it with the selection.
+    /// Called on launch, on manual refresh, and periodically by the device-poll task so
+    /// devices plugged in after the app opened are picked up automatically.
     func refreshDevices() async {
         let devs = await DeviceManager.listDevices()
+        applyDevices(devs)
+    }
+
+    private func applyDevices(_ devs: [Device]) {
+        guard devs != devices else { return }   // no change → don't disturb UI / selection
         devices = devs
-        if selectedDeviceId == nil { selectedDeviceId = devs.first?.id }
-        if devs.isEmpty { statusMessage = "无设备连接" }
+        // Auto-select the first device when nothing is selected, or when the previously
+        // selected device was unplugged.
+        if selectedDeviceId == nil || !devs.contains(where: { $0.id == selectedDeviceId }) {
+            selectedDeviceId = devs.first?.id
+        }
+        statusMessage = devs.isEmpty ? "无设备连接" : "Idle"
+    }
+
+    /// Poll `adb devices` in the background so hot-plugged devices appear without a manual
+    /// refresh. Lightweight (a short adb call every 2s); reconciliation is a no-op when the
+    /// list is unchanged, so the UI only updates on real changes.
+    private func startDevicePollTask() {
+        devicePollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let devs = await DeviceManager.listDevices()
+                guard let self else { return }
+                if Task.isCancelled { return }
+                self.applyDevices(devs)
+                try? await Task.sleep(nanoseconds: LogConfig.devicePollIntervalMs * 1_000_000)
+            }
+        }
     }
 
     // MARK: - Drain loop (100ms)

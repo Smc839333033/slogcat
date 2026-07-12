@@ -44,6 +44,7 @@ enum LogTheme {
         static let textPrimary    = Color.white
         static let textSecondary  = Color(white: 0.45)
         static let dotGrid        = Color.white.opacity(0.09)
+        static let controlHover   = Color.white.opacity(0.16)   // button hover — visible on charcoal
     }
 
     // MARK: - Light palette
@@ -56,6 +57,7 @@ enum LogTheme {
         static let textPrimary    = Color(white: 0.08)
         static let textSecondary  = Color(white: 0.50)
         static let dotGrid        = Color.black.opacity(0.13)
+        static let controlHover   = Color.black.opacity(0.10)   // button hover — visible on off-white
     }
 
     // MARK: - Resolved colors (read ThemeManager at call time)
@@ -67,6 +69,7 @@ enum LogTheme {
     static var textPrimary:   Color { ThemeManagerShared.isDark ? Dark.textPrimary   : Light.textPrimary }
     static var textSecondary: Color { ThemeManagerShared.isDark ? Dark.textSecondary : Light.textSecondary }
     static var dotGrid:       Color { ThemeManagerShared.isDark ? Dark.dotGrid        : Light.dotGrid }
+    static var controlHover:  Color { ThemeManagerShared.isDark ? Dark.controlHover   : Light.controlHover }
     static let accent         = Color(red: 1.0, green: 0.05, blue: 0.05)   // Nothing red — same in both
 
     // Back-compat aliases

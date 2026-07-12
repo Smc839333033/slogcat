@@ -11,6 +11,7 @@ enum LogConfig {
     static let drainIntervalMs: UInt64    = 50  // UI drain tick (smoother than 100ms)
     static let recomputeDebounceMs: UInt64 = 50  // filter recompute debounce (discrete actions)
     static let drainMaxLinesPerTick  = 2_000   // cap per-tick append → smooth burst-resume
+    static let devicePollIntervalMs: UInt64 = 2_000  // background `adb devices` poll → hot-plug detection
 
     // UserDefaults keys
     static let fontSizeKey    = "fontSize"
@@ -71,4 +72,47 @@ final class CursorView: NSView {
 struct PointerCursor: NSViewRepresentable {
     func makeNSView(context: Context) -> CursorView { CursorView() }
     func updateNSView(_ nsView: CursorView, context: Context) {}
+}
+
+/// Toolbar icon-button style: hover highlight + clear press feedback (background flash +
+/// slight scale) so a click never feels ignored. Also shows the pointing-hand cursor.
+struct ToolbarIconButtonStyle: ButtonStyle {
+    var disabled: Bool = false
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let active = configuration.isPressed && !disabled
+        let hover = hovering && !disabled
+        configuration.label
+            .frame(width: 24, height: 24)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(active ? LogTheme.accent.opacity(0.35)
+                                 : (hover ? LogTheme.controlHover : Color.clear))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(active ? LogTheme.accent
+                                   : (hover ? LogTheme.borderStrong : Color.clear),
+                            lineWidth: 1)
+            )
+            .scaleEffect(active ? 0.86 : 1.0)
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .contentShape(Rectangle())
+            .background(disabled ? nil : PointerCursor())
+            .onHover { hovering = $0 }
+    }
+}
+
+/// Press feedback for custom-labelled buttons (device picker, etc.): dims + shrinks slightly
+/// on press so the tap registers visually. Pairs with the button's own background/border.
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+            .background(PointerCursor())
+    }
 }

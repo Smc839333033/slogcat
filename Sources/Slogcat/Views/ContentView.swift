@@ -38,7 +38,6 @@ struct ContentView: View {
             w.isMovableByWindowBackground = true
             w.backgroundColor = LogTextBuilder.backgroundColor
         })
-        .task { await store.refreshDevices() }
         .sheet(isPresented: $showAdbConfig) { AdbConfigSheet() }
         // ⌘F opens search
         .background(Button("search") { openSearch() }.keyboardShortcut("f", modifiers: .command).hidden())
@@ -71,13 +70,13 @@ struct ContentView: View {
                 .fixedSize()
                 .frame(minWidth: 40, alignment: .trailing)
             Button { store.prevMatch() } label: { Image(systemName: "chevron.up") }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableButtonStyle())
                 .help("上一个")
             Button { store.nextMatch() } label: { Image(systemName: "chevron.down") }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableButtonStyle())
                 .help("下一个")
             Button { searchVisible = false; store.closeSearch() } label: { Image(systemName: "xmark") }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableButtonStyle())
                 .help("关闭")
         }
         .padding(.horizontal, 8)
@@ -179,14 +178,14 @@ struct ToolbarView: View {
     @State private var deviceMenuFrame: CGRect = .zero
 
     private var devicePicker: some View {
-        let label = store.selectedDeviceId ?? "DEFAULT"
+        let label = store.devices.isEmpty ? "WAITING FOR DEVICE" : (store.selectedDeviceId ?? "DEFAULT")
         return Button {
             deviceMenuOpen.toggle()
         } label: {
             HStack(spacing: 3) {
                 Text(label)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(LogTheme.textPrimary)
+                    .foregroundStyle(store.devices.isEmpty ? LogTheme.textSecondary : LogTheme.textPrimary)
                     .lineLimit(1)
                     .frame(maxWidth: 160, alignment: .leading)
                 Image(systemName: "chevron.down")
@@ -208,7 +207,7 @@ struct ToolbarView: View {
                 }
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableButtonStyle())
         .overlay(alignment: .topLeading) {
             if deviceMenuOpen {
                 ZStack(alignment: .topLeading) {
@@ -218,14 +217,23 @@ struct ToolbarView: View {
                         .contentShape(Rectangle())
                         .onTapGesture { deviceMenuOpen = false }
                     VStack(spacing: 0) {
-                        deviceMenuOption("DEFAULT", isSelected: store.selectedDeviceId == nil) {
-                            store.selectedDeviceId = nil
-                            deviceMenuOpen = false
-                        }
-                        ForEach(store.devices) { d in
-                            deviceMenuOption(d.id, isSelected: store.selectedDeviceId == d.id) {
-                                store.selectedDeviceId = d.id
+                        if store.devices.isEmpty {
+                            Text("Waiting for device…")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(LogTheme.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                        } else {
+                            deviceMenuOption("DEFAULT", isSelected: store.selectedDeviceId == nil) {
+                                store.selectedDeviceId = nil
                                 deviceMenuOpen = false
+                            }
+                            ForEach(store.devices) { d in
+                                deviceMenuOption(d.id, isSelected: store.selectedDeviceId == d.id) {
+                                    store.selectedDeviceId = d.id
+                                    deviceMenuOpen = false
+                                }
                             }
                         }
                     }
@@ -254,7 +262,7 @@ struct ToolbarView: View {
                 .background(PointerCursor())
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableButtonStyle())
     }
 
     private func sep() -> some View {
@@ -266,9 +274,8 @@ struct ToolbarView: View {
             Image(systemName: systemName)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(disabled ? LogTheme.textSecondary.opacity(0.4) : LogTheme.textPrimary)
-                .frame(width: 24, height: 24)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(ToolbarIconButtonStyle(disabled: disabled))
         .disabled(disabled)
         .help(help)
     }
@@ -309,17 +316,17 @@ struct AdbConfigSheet: View {
                 }
                 HStack(spacing: 10) {
                     Button { store.setFontSize(store.fontSize - 1) } label: {
-                        Image(systemName: "minus").frame(width: 24, height: 24)
+                        Image(systemName: "minus")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(ToolbarIconButtonStyle())
                     Text("\(Int(store.fontSize)) pt")
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(LogTheme.textPrimary)
                         .frame(minWidth: 50)
                     Button { store.setFontSize(store.fontSize + 1) } label: {
-                        Image(systemName: "plus").frame(width: 24, height: 24)
+                        Image(systemName: "plus")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(ToolbarIconButtonStyle())
                     Spacer()
                     Text("\(Int(store.fontSize)) / 8–28")
                         .font(.system(size: 10, design: .monospaced))
@@ -353,7 +360,7 @@ struct AdbConfigSheet: View {
                             .overlay(RoundedRectangle(cornerRadius: 3).stroke(store.theme.appearance == a ? LogTheme.accent.opacity(0.5) : LogTheme.border))
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableButtonStyle())
                     }
                 }
             }
