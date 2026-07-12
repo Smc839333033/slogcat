@@ -141,6 +141,14 @@ final class LogStore {
         recompileFilter()
     }
 
+    var allLevelsEnabled: Bool { enabledLevels.count == LogLevel.allCases.count }
+
+    /// Toggle all levels at once: enable all if any are off, otherwise disable all.
+    func toggleAllLevels() {
+        enabledLevels = allLevelsEnabled ? [] : Set(LogLevel.allCases)
+        recompileFilter()
+    }
+
     /// Add a committed (read-only) filter rule from the composer.
     func addRule(text: String, kind: FilterKind) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)

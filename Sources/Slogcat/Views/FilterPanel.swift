@@ -9,14 +9,14 @@ struct FilterPanel: View {
     @State private var composerKind: FilterKind = .msgInclude
     @State private var menuOpen: Bool = false
     @State private var menuFrame: CGRect = .zero
+    @State private var levelMenuOpen: Bool = false
+    @State private var levelMenuFrame: CGRect = .zero
 
     var body: some View {
         @Bindable var store = store
         let _ = store.theme.appearance   // refresh LogTheme colors on appearance toggle
         FlowLayout(spacing: 6) {
-            ForEach(LogLevel.allCases) { lvl in
-                levelChip(lvl)
-            }
+            levelSummaryChip
             composer
             ForEach(store.rules) { rule in
                 @Bindable var rule = rule
@@ -41,7 +41,20 @@ struct FilterPanel: View {
                 }
             }
         }
-        .zIndex(menuOpen ? 1000 : 0)
+        .overlay(alignment: .topLeading) {
+            if levelMenuOpen {
+                ZStack(alignment: .topLeading) {
+                    Color.clear
+                        .frame(width: 10_000, height: 10_000)
+                        .offset(x: -5_000, y: -5_000)
+                        .contentShape(Rectangle())
+                        .onTapGesture { levelMenuOpen = false }
+                    levelPopover
+                        .offset(x: levelMenuFrame.minX, y: levelMenuFrame.maxY + 4)
+                }
+            }
+        }
+        .zIndex((menuOpen || levelMenuOpen) ? 1000 : 0)
         .onChange(of: store.rules) { _, _ in store.recompileFilter() }
     }
 
@@ -213,23 +226,145 @@ struct FilterPanel: View {
         .overlay(RoundedRectangle(cornerRadius: 5).stroke(borderColor))
     }
 
-    private func levelChip(_ lvl: LogLevel) -> some View {
+    // MARK: Level filter — single summary chip that opens a popover
+
+    /// Compact entry point: shows which levels are currently visible. Clicking opens the
+    /// popover where individual levels are toggled — keeps the filter bar tidy.
+    private var levelSummaryChip: some View {
+        let enabled = LogLevel.allCases.filter { store.enabledLevels.contains($0) }
+        let all = store.allLevelsEnabled
+        let none = enabled.isEmpty
+        return Button {
+            levelMenuOpen.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(LogTheme.textSecondary)
+                Text("等级")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(LogTheme.textPrimary)
+                Rectangle().fill(LogTheme.border).frame(width: 1, height: 12)
+                // Summary: colored level letters, or 全部 / 无.
+                if all {
+                    Text("全部").font(.system(size: 10, weight: .medium)).foregroundStyle(LogTheme.textSecondary)
+                } else if none {
+                    Text("无").font(.system(size: 10, weight: .medium)).foregroundStyle(LogTheme.accent)
+                } else {
+                    HStack(spacing: 3) {
+                        ForEach(enabled) { lvl in
+                            Text(lvl.rawValue)
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(LogTheme.color(for: lvl))
+                        }
+                    }
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(LogTheme.textSecondary)
+                    .rotationEffect(.degrees(levelMenuOpen ? 180 : 0))
+                    .animation(.easeInOut(duration: 0.15), value: levelMenuOpen)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .fixedSize(horizontal: true, vertical: false)
+            .background(LogTheme.surfaceRaised)
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(none ? LogTheme.accent.opacity(0.5) : LogTheme.borderStrong))
+            // Report frame in the filter-panel space so the popover opens right below.
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { levelMenuFrame = geo.frame(in: .named("filterPanel")) }
+                        .onChange(of: geo.frame(in: .named("filterPanel"))) { _, f in levelMenuFrame = f }
+                }
+            )
+        }
+        .buttonStyle(PressableButtonStyle())
+        .help("日志等级过滤")
+    }
+
+    /// Popover body: an "all" toggle header + one row per level.
+    private var levelPopover: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                store.toggleAllLevels()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: store.allLevelsEnabled ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(store.allLevelsEnabled ? LogTheme.activeGreen : LogTheme.textSecondary)
+                    Text(store.allLevelsEnabled ? "全部隐藏" : "全部显示")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(LogTheme.textPrimary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(PointerCursor())
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Rectangle().fill(LogTheme.border).frame(height: 1)
+
+            ForEach(LogLevel.allCases) { lvl in
+                levelRow(lvl)
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(width: 190)
+        .background(LogTheme.background)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(LogTheme.borderStrong))
+        .shadow(color: .black.opacity(0.28), radius: 10, y: 4)
+    }
+
+    private func levelRow(_ lvl: LogLevel) -> some View {
         let on = store.enabledLevels.contains(lvl)
         let c = LogTheme.color(for: lvl)
-        return Button {
-            store.toggleLevel(lvl)
-        } label: {
-            Text(lvl.rawValue)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(on ? c : LogTheme.textSecondary)
-                .frame(height: 30)
-                .frame(minWidth: 28)
-                .fixedSize(horizontal: true, vertical: false)
-                .background(on ? c.opacity(0.14) : Color.clear)
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(c.opacity(on ? 0.7 : 0.18)))
+        return LevelRow(level: lvl, tint: c, on: on) { store.toggleLevel(lvl) }
+    }
+}
+
+// MARK: - Level row inside the popover
+
+private struct LevelRow: View {
+    let level: LogLevel
+    let tint: Color
+    let on: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                // Color swatch with the level letter.
+                Text(level.rawValue)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(on ? tint : LogTheme.textSecondary)
+                    .frame(width: 20, height: 20)
+                    .background(on ? tint.opacity(0.16) : Color.clear)
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(tint.opacity(on ? 0.7 : 0.2)))
+                Text(level.displayName)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(on ? LogTheme.textPrimary : LogTheme.textSecondary)
+                Spacer(minLength: 4)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(LogTheme.activeGreen)
+                    .frame(width: 12)
+                    .opacity(on ? 1 : 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovering ? LogTheme.surfaceRaised : Color.clear)
+            .background(PointerCursor())
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(lvl.displayName)
+        .onHover { hovering = $0 }
     }
 }
 
