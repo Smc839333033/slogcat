@@ -77,12 +77,12 @@ struct ContentView: View {
 
             VStack(spacing: 0) {
                 deviceMenuOption("DEFAULT", isSelected: store.selectedDeviceId == nil) {
-                    store.selectedDeviceId = nil
+                    store.selectDevice(nil)
                     deviceMenuOpen = false
                 }
-                ForEach(store.devices) { d in
-                    deviceMenuOption(d.id, isSelected: store.selectedDeviceId == d.id) {
-                        store.selectedDeviceId = d.id
+                ForEach(store.devices, id: \.self) { d in
+                    deviceMenuOption("[\(d.platform.label)] \(d.id)", isSelected: store.selectedDeviceId == d.id) {
+                        store.selectDevice(d.id)
                         deviceMenuOpen = false
                     }
                 }
@@ -269,7 +269,12 @@ struct ToolbarView: View {
 
     private var devicePicker: some View {
         let hasDevices = !store.devices.isEmpty
-        let label = hasDevices ? (store.selectedDeviceId ?? "DEFAULT") : "WAITING FOR DEVICE"
+        let selected = store.devices.first { $0.id == store.selectedDeviceId }
+        let label: String = {
+            guard hasDevices else { return "WAITING FOR DEVICE" }
+            if let d = selected { return "[\(d.platform.label)] \(d.id)" }
+            return "DEFAULT"
+        }()
         return Button {
             guard hasDevices else { return }   // nothing to pick → don't open an empty menu
             deviceMenuOpen.toggle()
@@ -345,6 +350,22 @@ struct AdbConfigSheet: View {
                     .foregroundStyle(LogTheme.textSecondary)
                     .lineSpacing(3)
                 TextField("/Users/you/Library/Android/sdk/platform-tools/adb", text: $store.adbPath)
+                    .techField()
+            }
+
+            Rectangle().fill(LogTheme.border).frame(height: 1)
+
+            // Section: HDC Path (HarmonyOS)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 7) {
+                    Circle().fill(LogTheme.accent).frame(width: 7, height: 7)
+                    Text("HDC PATH").font(LogTheme.labelFont(11)).tracking(1.5)
+                }
+                Text("抓取 HarmonyOS 设备日志需要 hdc；留空则自动查找。\n未安装 hdc 不影响 Android(adb) 使用。")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(LogTheme.textSecondary)
+                    .lineSpacing(3)
+                TextField("/Users/you/Library/Huawei/Sdk/openharmony/toolchains/hdc", text: $store.hdcPath)
                     .techField()
             }
 

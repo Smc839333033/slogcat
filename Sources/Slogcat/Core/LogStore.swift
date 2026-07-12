@@ -15,6 +15,7 @@ final class LogStore {
         return v > 0 ? v : LogConfig.defaultDisplayCap
     }()
     var adbPath: String = AdbLocator.userPath ?? ""
+    var hdcPath: String = HdcLocator.userPath ?? ""
     let theme = ThemeManager()
 
     // Stream state
@@ -31,6 +32,7 @@ final class LogStore {
 
     private let pipeline: LogPipeline
     private let adb = AdbProcess()
+    private let hdc = HdcProcess()
     private var streamTask: Task<Void, Never>?
     private var snapshotTask: Task<Void, Never>?
     private var recomputeTask: Task<Void, Never>?
@@ -47,20 +49,65 @@ final class LogStore {
 
     // MARK: - Streaming
 
+    /// The currently selected device (resolved from `selectedDeviceId` against the device list),
+    /// or nil when "DEFAULT" / nothing is selected. Drives which tool (adb/hdc) streams logs.
+    var selectedDevice: Device? {
+        guard let id = selectedDeviceId else { return nil }
+        return devices.first { $0.id == id }
+    }
+
+    /// Platform to stream from: the selected device's platform, else Android (default tool).
+    private var streamPlatform: Platform { selectedDevice?.platform ?? .android }
+
+    /// Change the target device. If the selection actually changes, the current log buffer is
+    /// cleared (logs from the previous device — especially a different platform like Android vs
+    /// HarmonyOS — must not mix) and, if we were streaming, streaming restarts on the new device.
+    func selectDevice(_ id: String?) {
+        guard id != selectedDeviceId else { return }
+        let wasStreaming = isStreaming
+        if wasStreaming { stopStreaming() }
+        selectedDeviceId = id
+        // Clear the previous device's logs, then restart streaming — awaiting the pipeline clear
+        // first so the new stream never ingests into a buffer that's about to be wiped.
+        clearing = true
+        statusMessage = "Cleared"
+        closeSearch()
+        Task {
+            await pipeline.clear()
+            coordinator?.clear()
+            displayedCount = 0
+            rawCount = 0
+            clearing = false
+            if wasStreaming { startStreaming() }
+        }
+    }
+
     func startStreaming() {
         guard !isStreaming else { return }
-        if !adbPath.isEmpty { AdbLocator.userPath = adbPath }
-        guard AdbLocator.resolvedPath() != nil else {
-            errorMessage = "未找到 adb。请在右上角设置 adb 完整路径（如 ~/Library/Android/sdk/platform-tools/adb）。"
-            return
+        let platform = streamPlatform
+
+        if platform == .harmony {
+            if !hdcPath.isEmpty { HdcLocator.userPath = hdcPath }
+            guard HdcLocator.resolvedPath() != nil else {
+                errorMessage = "未找到 hdc。请在设置中填写 hdc 完整路径（HarmonyOS SDK toolchains 目录下）。"
+                return
+            }
+        } else {
+            if !adbPath.isEmpty { AdbLocator.userPath = adbPath }
+            guard AdbLocator.resolvedPath() != nil else {
+                errorMessage = "未找到 adb。请在右上角设置 adb 完整路径（如 ~/Library/Android/sdk/platform-tools/adb）。"
+                return
+            }
         }
         errorMessage = nil
         isStreaming = true
         statusMessage = "Streaming…"
 
         let deviceId = selectedDeviceId
-        streamTask = Task.detached(priority: .userInitiated) { [adb, pipeline, weak self] in
-            let stream = adb.logcatLines(deviceId: deviceId)
+        streamTask = Task.detached(priority: .userInitiated) { [adb, hdc, pipeline, weak self] in
+            let stream: AsyncThrowingStream<String, Error> = platform == .harmony
+                ? hdc.hilogLines(deviceId: deviceId)
+                : adb.logcatLines(deviceId: deviceId)
             var batch: [String] = []
             batch.reserveCapacity(256)
             do {
@@ -68,15 +115,15 @@ final class LogStore {
                     if Task.isCancelled { break }
                     batch.append(line)
                     if batch.count >= 256 {
-                        await pipeline.ingest(lines: batch)
+                        await pipeline.ingest(lines: batch, platform: platform)
                         batch.removeAll(keepingCapacity: true)
                     }
                 }
             } catch {
-                await self?.applyError(error.localizedDescription)
+                await self?.applyError(error.localizedDescription, platform: platform)
                 return
             }
-            if !batch.isEmpty { await pipeline.ingest(lines: batch) }
+            if !batch.isEmpty { await pipeline.ingest(lines: batch, platform: platform) }
         }
     }
 
@@ -84,14 +131,16 @@ final class LogStore {
         streamTask?.cancel()
         streamTask = nil
         adb.terminate()
+        hdc.terminate()
         isStreaming = false
         statusMessage = "Stopped"
     }
 
     func toggleStreaming() { isStreaming ? stopStreaming() : startStreaming() }
 
-    private func applyError(_ msg: String) {
-        errorMessage = "adb 错误: \(msg)"
+    private func applyError(_ msg: String, platform: Platform) {
+        let tool = platform == .harmony ? "hdc" : "adb"
+        errorMessage = "\(tool) 错误: \(msg)"
         isStreaming = false
         statusMessage = "Stopped"
     }
@@ -317,12 +366,13 @@ final class LogStore {
 
     // MARK: - Devices
 
-    /// Fetch the current device list and reconcile it with the selection.
+    /// Fetch the current device list (both adb and hdc) and reconcile it with the selection.
     /// Called on launch, on manual refresh, and periodically by the device-poll task so
     /// devices plugged in after the app opened are picked up automatically.
     func refreshDevices() async {
-        let devs = await DeviceManager.listDevices()
-        applyDevices(devs)
+        async let android = DeviceManager.listDevices()
+        async let harmony = HdcDeviceManager.listDevices()
+        applyDevices(await android + (await harmony))
     }
 
     private func applyDevices(_ devs: [Device]) {
@@ -336,13 +386,15 @@ final class LogStore {
         statusMessage = devs.isEmpty ? "无设备连接" : "Idle"
     }
 
-    /// Poll `adb devices` in the background so hot-plugged devices appear without a manual
-    /// refresh. Lightweight (a short adb call every 2s); reconciliation is a no-op when the
-    /// list is unchanged, so the UI only updates on real changes.
+    /// Poll `adb devices` AND `hdc list targets` in the background so hot-plugged devices of
+    /// either platform appear without a manual refresh. Lightweight; reconciliation is a no-op
+    /// when the merged list is unchanged. hdc polling is a no-op / empty when hdc isn't installed.
     private func startDevicePollTask() {
         devicePollTask = Task { [weak self] in
             while !Task.isCancelled {
-                let devs = await DeviceManager.listDevices()
+                async let android = DeviceManager.listDevices()
+                async let harmony = HdcDeviceManager.listDevices()
+                let devs = await android + (await harmony)
                 guard let self else { return }
                 if Task.isCancelled { return }
                 self.applyDevices(devs)

@@ -1,5 +1,20 @@
 import Foundation
 
+/// Source platform for a device / log stream. Android uses adb+logcat, HarmonyOS uses
+/// hdc+hilog. Log line formats differ per platform, so the parser is dispatched on this.
+enum Platform: String, Sendable, Hashable, CaseIterable {
+    case android
+    case harmony
+
+    /// Short tag shown in the device list / picker.
+    var label: String {
+        switch self {
+        case .android: return "ADB"
+        case .harmony: return "HDC"
+        }
+    }
+}
+
 enum LogLevel: String, CaseIterable, Identifiable, Sendable {
     case verbose = "V"
     case debug = "D"
@@ -29,6 +44,9 @@ struct LogEntry: Identifiable, Sendable, Hashable {
     let level: LogLevel
     let tag: String
     let message: String
+    /// Which platform produced this line. Defaults to .android so existing call sites and
+    /// the Android path are unaffected.
+    var platform: Platform = .android
 
     /// Reconstructed threadtime-style line for copy/export.
     var rawLine: String {
@@ -40,7 +58,9 @@ struct LogEntry: Identifiable, Sendable, Hashable {
 struct Device: Identifiable, Sendable, Hashable {
     let id: String
     let state: String
-    var displayName: String { id + " · " + state }
+    /// Which tool this device is reachable through (adb vs hdc). Defaults to .android.
+    var platform: Platform = .android
+    var displayName: String { "[\(platform.label)] " + id + " · " + state }
 }
 
 // MARK: - Filter rules

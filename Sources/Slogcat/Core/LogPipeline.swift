@@ -44,11 +44,15 @@ actor LogPipeline {
         trimPendingIfNeeded()
     }
 
-    func ingest(lines: [String]) {
+    func ingest(lines: [String], platform: Platform = .android) {
         for line in lines {
             seq &+= 1
             rawCount &+= 1
-            let entry = LineParser.parse(line, seq: seq)
+            // Dispatch on platform: Android → threadtime LineParser (unchanged path),
+            // HarmonyOS → HilogLineParser. Everything downstream is platform-agnostic.
+            let entry = platform == .harmony
+                ? HilogLineParser.parse(line, seq: seq)
+                : LineParser.parse(line, seq: seq)
             rawBuffer.append(entry)
             if FilterEngine.test(entry, against: filter) {
                 let attr = LogTextBuilder.attributedString(for: entry, highlightRegexes: highlightRegexes, font: font)
