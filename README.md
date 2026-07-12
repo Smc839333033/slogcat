@@ -1,6 +1,6 @@
 # slogcat
 
-一个 macOS 端实时抓取 Android 日志的工具，提供过滤、屏蔽、搜索等功能。轻量高性能，适合不想为看日志而启动 Android Studio 的开发者。
+一个 macOS 端实时抓取 Android / HarmonyOS 日志的工具，提供过滤、屏蔽、搜索等功能。轻量高性能，适合不想为看日志而启动 Android Studio / DevEco Studio 的开发者。
 
 ## 截图
 
@@ -12,11 +12,15 @@
 
 - macOS 14.0 (Sonoma) 或更高
 - Xcode Command Line Tools（`xcode-select --install`）
-- Android SDK platform-tools 中的 `adb`（自动检测 `~/Library/Android/sdk/platform-tools/adb`，也可在设置中手动指定路径）
+- 抓取 Android 日志：Android SDK platform-tools 中的 `adb`（自动检测 `~/Library/Android/sdk/platform-tools/adb`，也可在设置中手动指定路径）
+- 抓取 HarmonyOS 日志（可选）：HarmonyOS/OpenHarmony SDK 中的 `hdc`（自动检测 DevEco Studio 应用包及常见 SDK 路径，也可在设置中手动指定路径）。未安装 `hdc` 不影响 Android 使用
 
 ## 功能
 
-- 实时流式抓取 `adb logcat`，50ms 增量追加，滚动丝滑
+- 实时流式抓取 Android `adb logcat` 与 HarmonyOS `hdc shell hilog`，50ms 增量追加，滚动丝滑
+- 两平台设备统一混合在同一下拉列表，带 `[ADB]` / `[HDC]` 标签；后台自动轮询热插拔设备
+- 切换设备（含跨平台切换）时自动清空日志并重新开始，不同来源日志不混淆
+- 按平台自动分派日志解析器，HarmonyOS 日志格式与 Android 独立处理，互不影响
 - NSTextView + 环形缓冲区（默认 20000 行，可配置），零 diff 追加
 - 后台 Actor 离线构建 NSAttributedString，主线程不卡顿
 - 多规则过滤系统：内容/Tag 的包含/排除/正则，PID 精确匹配
@@ -71,17 +75,20 @@ slogcat/
 │   └── Info.plist                # Bundle 配置
 └── Sources/Slogcat/
     ├── SlogcatApp.swift           # @main 入口
-    ├── Models.swift               # LogLevel / LogEntry / FilterRule
-    ├── FilterEngine.swift         # 过滤规则编译与匹配
+    ├── Models.swift               # Platform / LogLevel / LogEntry / Device / FilterRule
+    ├── FilterEngine.swift         # 过滤规则编译与匹配（平台无关）
     ├── RingBuffer.swift           # 环形缓冲区
     ├── Components.swift           # LogConfig / DotGridBackground / 工具组件
     ├── Adb/
     │   ├── AdbProcess.swift       # adb 子进程封装 + 路径检测
-    │   ├── DeviceManager.swift    # 设备列表
-    │   └── LineParser.swift       # logcat 行解析
+    │   ├── DeviceManager.swift    # adb 设备列表
+    │   ├── LineParser.swift       # Android logcat 行解析
+    │   ├── HdcProcess.swift       # hdc 子进程封装 + 路径自动检测
+    │   ├── HdcDeviceManager.swift # hdc 设备列表（hdc 缺失时静默）
+    │   └── HilogLineParser.swift  # HarmonyOS hilog 行解析
     ├── Core/
-    │   ├── LogPipeline.swift      # 后台 Actor：解析+过滤+AttributedString 构建
-    │   └── LogStore.swift         # @Observable UI 状态容器
+    │   ├── LogPipeline.swift      # 后台 Actor：按平台解析+过滤+AttributedString 构建
+    │   └── LogStore.swift         # @Observable UI 状态容器 + 平台分派
     ├── Theme/
     │   └── LogTheme.swift         # 主题 + ThemeManager + TechField
     └── Views/
