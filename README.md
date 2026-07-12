@@ -50,19 +50,15 @@ swift build -c release
 ### 打包为 .app / .dmg
 
 ```bash
-./build-app.sh
+./build-app.sh          # 仅生成 .app
+./build-app.sh --dmg    # 同时生成可分发的 .dmg 安装包
 ```
 
 产物路径：
 - `build/slogcat.app` — 可直接双击运行或拖入 Applications
-- `build/slogcat.dmg` — DMG 安装包
+- `build/slogcat.dmg` — DMG 安装包（挂载后拖动 slogcat.app 到 Applications 即可安装）
 
-`build-app.sh` 会自动完成：release 编译 → 组装 .app bundle（含 Info.plist + AppIcon.icns）→ ad-hoc 签名。如需生成 DMG：
-
-```bash
-cd build
-hdiutil create -volname "slogcat" -srcfolder slogcat.app -ov -format UDZO slogcat.dmg
-```
+`build-app.sh` 会自动完成：release 编译 → 组装 .app bundle（含 Info.plist + AppIcon.icns）→ ad-hoc 签名。加 `--dmg` 时额外把 .app 与 `Applications` 快捷方式打进 DMG，用户挂载后拖拽即可安装。
 
 ## 项目结构
 
